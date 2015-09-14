@@ -2,7 +2,7 @@ makeWebBook
 ===========
 
 Go program to build a scientific web book. All the details are described
-in the web book [Building Scientific Web Books with makeWebBook](martinotter.github.io/BuildingScientificWebBooks/Tutorial/)
+in the web book [Building Scientific Web Books with makeWebBook](http://martinotter.github.io/BuildingScientificWebBooks/Tutorial/)
 
 A book consists of a set of HTML files. A configuration file
 (configuration.json) defines the order of the files. With the command
