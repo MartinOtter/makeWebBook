@@ -37,5 +37,5 @@ contents" file, the previous, and the next file.
 The "table of contents" file is updated with the actual document
 structure.
 
-This makeWebBook program is licensed under the 
+The makeWebBook.go program is licensed under the 
 [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License](http://creativecommons.org/licenses/by-nc-sa/4.0/).
