@@ -928,7 +928,7 @@ func updateCaptionText(text string, fig bool, nrCap int) (newText string, modifi
 		if index == nil {
 			// no caption number was present
 			newText = capStr + text
-			fmt.Println("      Caption number added  :", newText)
+			fmt.Println("      Caption number added:", newText)
 		} else {
 			// Caption number was present: replace it with correct one
 			newText = capStr + string(byteText[index[1]:])
@@ -979,6 +979,7 @@ func updateEquationText(text string) (newText string, modified bool, label strin
 		}
 		newText = text[0:index[1]] + " " + eqStr + ` \;\;\;\;\; ` + text[index[1]:]
 		fmt.Println("      Equation number added:", newText)
+      modified = true
 	} else {
 		// Check whether equation number is correct
 		iEnd := index[1]
@@ -1028,7 +1029,7 @@ func updateSectionDocuments() {
 					// Internal link; check that target is defined
 					bookMark, present := Bookmarks[element.ID]
 					if !present {
-						fmt.Printf("      Internal link is not checked: <a href=\"%s\">%s<\\a>\n",
+						fmt.Printf("      Internal link not resolved (wrong id?): <a href=\"%s\">%s<\\a>\n",
 							element.Href, element.Text)
 					} else {
 						if bookMark.FileName != element.NewText ||
@@ -1139,7 +1140,7 @@ func updateOneSectionDocument(movedFileName string, sectionFile SectionFileType,
 				os.Exit(1)
 			}
 			// Make a copy of the actual file until <nav>, generate a new <nav>..</nav>
-			fmt.Println("Update navigation bar of file:", sectionFile.FileName)
+			fmt.Println("      Update navigation bar of file:", sectionFile.FileName)
 			fmt.Fprint(file, old[0:iNext])
 			writeNavigationBar(file, navFilePrevious, navFileNext, navFileToc)
 			iSearch = iNext
