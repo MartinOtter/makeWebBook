@@ -107,6 +107,7 @@ type ConfigurationType struct {
 type SectionType struct {
 	FileName  string         // File where section is present
 	ID        string         // <hx id=ID>
+   Label     string         // Label of section (e.g. "Chapter 1", "Preface", "References")
 	Text      string         // <hx id=ID>Text</hx>
 	Modified  bool           // = true, if Text was modified (section/caption/equation number); = false, if it was not modified
 	Sections  []SectionType  // subsections in this section
@@ -136,23 +137,21 @@ type ElementType struct {
 	StartTag string // Start-tag of element, without closing ">" and without attributes (e.g. "<h1")
 	EndTag   string // End-tag of element (e.g. "</h1>")
 	Text     string // Text of element
-	Href     string // If StartTag == "<a" then (if Href != "" then internal link: <a href="Href">..</a> else external link)
-	// else Href="" (dummy)
-	NewText string // If Modified = true, the modified text, otherwise Text
-	// (If StartTag=="<a" then target file name: <a href="TargetFileName#TargetID" title="Tooltip">Text</a>)
+	Href     string // If StartTag == "<a" then (if Href != "" then internal link: <a href="Href">..</a> else external link) else Href="" (dummy)
+	NewText  string // If Modified = true, the modified text, otherwise Text (If StartTag=="<a" then target file name: <a href="TargetFileName#TargetID" title="Tooltip">Text</a>)
 	Tooltip  string // If StartTag == "<a then tooltip; otherwise Tooltip="" (dummy)
 	Modified bool   // = true, if Text was modified (e.g. section or caption number)
-	ID       string // id attribute of element
-	// or targetID if startTag = "<a"
-	NewID bool // = true, if a new ID was generated, because no ID was present
+	ID       string // id attribute of element or targetID if startTag = "<a"
+	NewID    bool   // = true, if a new ID was generated, because no ID was present
 }
 
 // Information about the modified data on a file
 type SectionFileType struct {
-	FileName  string
-	NewNav    bool // = true, if no nav was present in the file and a new one needs to be generated
-	UpdateNav bool // If NewNav = false (otherwise dummy):
-	Modified  bool // = true, if at least one element in Elements needs to be modified
+	FileName  string       // Name of the file
+   NavList   []string     // The elements of the nav element. Empty array if no nav is present (NewNav=false)
+	NewNav    bool         // = true, if no nav was present in the file and a new one needs to be generated
+	UpdateNav bool         // If NewNav = false (otherwise dummy): If UpdateNav=true, the existing nav needs to be updated, otherwise no update needed
+	Modified  bool         // = true, if at least one element in Elements needs to be modified
 	Elements  []ElementType
 }
 
@@ -200,6 +199,7 @@ type CountersType struct {
 var Configuration ConfigurationType
 var BookStructure BookStructureType
 var Bookmarks = make(map[string]BookmarkType)
+var ReqNav = make([]string, 0, 10)  // Required nav element
 
 // Global variable holding the full path to the actual backup directory
 var BackupPath string
@@ -351,7 +351,6 @@ func getConfiguration(fileName string) {
 
 // Determine document structure and store results in gobal variable BookStructure
 func getDocumentStructure() {
-	fmt.Println("Determine document structure:")
 	BookStructure = BookStructureType{
 		CoverFileName: Configuration.CoverFileName,
 		TocFileName:   Configuration.TocFileName,
@@ -362,17 +361,90 @@ func getDocumentStructure() {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Determine structure of every section file
+	fmt.Println("Determine document structure:")   
 	for iFile, file := range Configuration.SectionsFileNames {
 		getStructureOfOneFile(file, iFile, r)
 	}
+   
+   // Build required navigation bar (with exception of Previous and Next)
+   ReqNav = append(ReqNav, Configuration.TocFileName)
+   ReqNav = append(ReqNav, "")  // Previous
+   ReqNav = append(ReqNav, "")  // Next
+   ReqNav = append(ReqNav, Configuration.CoverFileName)
+   for _, section := range BookStructure.Sections {
+      ReqNav = append(ReqNav, section.FileName + "#" + section.ID)
+   }
+   
+   // Determine whether navigation bars need to be updated
+	fmt.Println("\nDetermine whether nav elements need to be updated:")
+	for iFile, sectionFile := range BookStructure.SectionFiles {
+      checkNavigationBarOfOneFile(iFile, sectionFile)
+	}
 }
 
+
+func checkNavigationBarOfOneFile(iFile int, sectionFile SectionFileType) {
+   fileName := BookStructure.SectionFiles[iFile].FileName
+   
+   // Check whether a nav element is not present
+   if BookStructure.SectionFiles[iFile].NewNav {
+      fmt.Printf("   %s (nav will be added)\n", fileName)
+      return
+   }
+    
+   // Build required "Previous" and "Next" file references
+   last := false 
+   
+   // Previous  
+	if iFile > 0 { 
+		ReqNav[1] = Configuration.SectionsFileNames[iFile-1]
+	} else {
+		ReqNav[1] = Configuration.CoverFileName
+	}
+   
+   // Next
+	if iFile < len(Configuration.SectionsFileNames)-1 {
+		ReqNav[2] = Configuration.SectionsFileNames[iFile+1]
+	} else {
+      last = true
+		ReqNav[2] = ""
+	}
+   
+   // Check whether number of references agree
+   lenReqNav := len(ReqNav)
+   lenNav    := len(sectionFile.NavList)
+   if last && lenReqNav-1 != lenNav || !last && lenReqNav != lenNav {
+      // Wrong number of references in nav element: nav element needs to be newly generated
+      BookStructure.SectionFiles[iFile].UpdateNav = true
+      fmt.Printf("   %s (nav will be updated)\n", fileName)
+      return
+   }
+   
+   // Check navigation
+   j := 0 
+   for i:=0; i<lenNav; i++ { 
+      if last && i > 1 {
+         j = i+1
+      } else {
+         j = i 
+      }
+      if sectionFile.NavList[i] != ReqNav[j] {
+         BookStructure.SectionFiles[iFile].UpdateNav = true
+         fmt.Printf("   %s (nav will be updated)\n", fileName)      
+         return
+      }
+   }
+   BookStructure.SectionFiles[iFile].UpdateNav = false
+   return
+}
+   
+   
 func getStructureOfOneFile(fileName string, iFile int, r *rand.Rand) {
 	fmt.Println("  ", fileName)
 
 	// Store file name and default section/caption structure
 	BookStructure.SectionFiles = append(BookStructure.SectionFiles,
-		SectionFileType{fileName, true, false, false, make([]ElementType, 0, 10)})
+		SectionFileType{fileName, make([]string,0,10), true, false, false, make([]ElementType, 0, 10)})
 	iSectionFile := len(BookStructure.SectionFiles) - 1
 
 	// Open file
@@ -405,40 +477,11 @@ func getStructureOfOneFile(fileName string, iFile int, r *rand.Rand) {
 			BookStructure.SectionFiles[iSectionFile].NewNav = false
 
 			// Inquire file references in navigation bar
-			var navFiles [3]string
-			var navRequiredFiles [3]string
-			navFiles[0] = ""
-			navFiles[1] = ""
-			navFiles[2] = ""
-
 			s.Find("a").Each(func(i int, ss *goquery.Selection) {
-				if i > 2 {
-					fmt.Println("Error: Existing <nav> has more as 3 <a> elements in file: ", fileName)
-					fmt.Println("       This is not supported")
-					os.Exit(1)
-				}
-				navFiles[i] = ss.AttrOr("href", "???")
+            // Save a new nav file reference
+            BookStructure.SectionFiles[iSectionFile].NavList = append(BookStructure.SectionFiles[iSectionFile].NavList, ss.AttrOr("href", "???"))
 				iNav++
 			})
-
-			// Check whether the three file references are up-to-date
-			navRequiredFiles[0] = Configuration.TocFileName
-			if iSectionFile > 0 {
-				navRequiredFiles[1] = Configuration.SectionsFileNames[iSectionFile-1]
-			} else {
-				navRequiredFiles[1] = Configuration.CoverFileName
-			}
-			if iSectionFile < len(Configuration.SectionsFileNames)-1 {
-				navRequiredFiles[2] = Configuration.SectionsFileNames[iSectionFile+1]
-			} else {
-				navRequiredFiles[2] = ""
-			}
-
-			if navFiles[0] != navRequiredFiles[0] ||
-				navFiles[1] != navRequiredFiles[1] ||
-				navFiles[2] != navRequiredFiles[2] {
-				BookStructure.SectionFiles[iSectionFile].UpdateNav = true
-			}
 			return
 		} else {
 			element = true
@@ -571,7 +614,7 @@ func getStructureOfOneFile(fileName string, iFile int, r *rand.Rand) {
 			// Update h1 section number if necessary and make a new h1 entry in BookStructure
 			newText, modified, label = updateSectionText(text, 1, 0, 0, 0)
 			BookStructure.Sections = append(BookStructure.Sections,
-				SectionType{fileName, id, newText, modified,
+				SectionType{fileName, id, label, newText, modified,
 					make([]SectionType, 0, 5),
 					make([]CaptionType, 0, 5),
 					make([]EquationType, 0, 5)})
@@ -588,7 +631,7 @@ func getStructureOfOneFile(fileName string, iFile int, r *rand.Rand) {
 			newText, modified, label = updateSectionText(text, 2, i2+1, 0, 0)
 			BookStructure.Sections[i1].Sections =
 				append(BookStructure.Sections[i1].Sections,
-					SectionType{fileName, id, newText, modified,
+					SectionType{fileName, id, label, newText, modified,
 						make([]SectionType, 0, 5),
 						make([]CaptionType, 0, 5),
 						make([]EquationType, 0, 5)})
@@ -610,7 +653,7 @@ func getStructureOfOneFile(fileName string, iFile int, r *rand.Rand) {
 			newText, modified, label = updateSectionText(text, 3, i2+1, i3+1, 0)
 			BookStructure.Sections[i1].Sections[i2].Sections =
 				append(BookStructure.Sections[i1].Sections[i2].Sections,
-					SectionType{fileName, id, newText, modified,
+					SectionType{fileName, id, label, newText, modified,
 						make([]SectionType, 0, 5),
 						make([]CaptionType, 0, 5),
 						make([]EquationType, 0, 5)})
@@ -637,7 +680,7 @@ func getStructureOfOneFile(fileName string, iFile int, r *rand.Rand) {
 			newText, modified, label = updateSectionText(text, 4, i2+1, i3+1, i4+1)
 			BookStructure.Sections[i1].Sections[i2].Sections[i3].Sections =
 				append(BookStructure.Sections[i1].Sections[i2].Sections[i3].Sections,
-					SectionType{fileName, id, newText, modified,
+					SectionType{fileName, id, label, newText, modified,
 						make([]SectionType, 0, 1),
 						make([]CaptionType, 0, 1),
 						make([]EquationType, 0, 5)})
@@ -979,7 +1022,7 @@ func updateEquationText(text string) (newText string, modified bool, label strin
 		}
 		newText = text[0:index[1]] + " " + eqStr + ` \;\;\;\;\; ` + text[index[1]:]
 		fmt.Println("      Equation number added:", newText)
-      modified = true
+		modified = true
 	} else {
 		// Check whether equation number is correct
 		iEnd := index[1]
@@ -1002,7 +1045,7 @@ func updateEquationText(text string) (newText string, modified bool, label strin
 // Update section documents with changed section or caption numbers,
 // introducing missing element id's etc.
 func updateSectionDocuments() {
-	fmt.Printf("Change documents:\n")
+	fmt.Printf("\nChange documents:\n")
 	for iSectionFile, sectionFile := range BookStructure.SectionFiles {
 		fmt.Printf("   %s\n", sectionFile.FileName)
 
@@ -1104,23 +1147,20 @@ func updateOneSectionDocument(movedFileName string, sectionFile SectionFileType,
 	// Update navigation bar (if needed)
 	if sectionFile.NewNav || sectionFile.UpdateNav {
 		// New navigation bar, or update existing one; determine file names
-		navFileToc := Configuration.TocFileName
-		var navFilePrevious string
-		var navFileNext string
 		if iSectionFile > 0 {
-			navFilePrevious = Configuration.SectionsFileNames[iSectionFile-1]
+			ReqNav[1] = Configuration.SectionsFileNames[iSectionFile-1]
 		} else {
-			navFilePrevious = Configuration.CoverFileName
+			ReqNav[1] = Configuration.CoverFileName
 		}
 		if iSectionFile < len(Configuration.SectionsFileNames)-1 {
-			navFileNext = Configuration.SectionsFileNames[iSectionFile+1]
+			ReqNav[2] = Configuration.SectionsFileNames[iSectionFile+1]
 		} else {
-			navFileNext = ""
+			ReqNav[2] = ""
 		}
 
 		if sectionFile.NewNav {
 			// Introduce new navigation bar directly after <body>
-			fmt.Printf("Generating new navigation bar \"%s\" directly after \"%s\" in file %s\n", beginNavBar, beginBody, sectionFile.FileName)
+			fmt.Println("      <nav> element introduced")
 			iNext = strings.Index(old, beginBody)
 			if iNext < 0 {
 				fmt.Printf("Error: File \"%s\" does not contain \"%s\"\n", movedFileName, beginBody)
@@ -1129,7 +1169,7 @@ func updateOneSectionDocument(movedFileName string, sectionFile SectionFileType,
 			iNext = iNext + len(beginBody)
 			fmt.Fprint(file, old[0:iNext])
 			fmt.Fprintf(file, "\n")
-			writeNavigationBar(file, navFilePrevious, navFileNext, navFileToc)
+			writeNavigationBar(file, iSectionFile)
 			iLast = iNext
 			iSearch = iNext
 		} else {
@@ -1140,9 +1180,9 @@ func updateOneSectionDocument(movedFileName string, sectionFile SectionFileType,
 				os.Exit(1)
 			}
 			// Make a copy of the actual file until <nav>, generate a new <nav>..</nav>
-			fmt.Println("      Update navigation bar of file:", sectionFile.FileName)
+			fmt.Println("      <nav> element updated")
 			fmt.Fprint(file, old[0:iNext])
-			writeNavigationBar(file, navFilePrevious, navFileNext, navFileToc)
+			writeNavigationBar(file, iSectionFile)
 			iSearch = iNext
 			iNext = strings.Index(old[iSearch:], endNavBar)
 			if iNext < 0 {
@@ -1404,64 +1444,24 @@ func writeContentsStructure(file *os.File) {
 	fmt.Fprintln(file, endTableOfContents)
 }
 
-// Write or update navigation bar in one file
-func updateNavigationBar(actualName, previousName, nextName, tocName string) {
-	// Move actual file to backup directory and read it
-	movedActualName := filepath.Join(BackupPath, actualName)
-	err := os.Rename(actualName, movedActualName)
-	if err != nil {
-		log.Fatal(err)
-	}
-	actual, err := ioutil.ReadFile(movedActualName)
-	if err != nil {
-		log.Fatal(err)
-	}
-	str := string(actual)
-
-	// Create actual file
-	file, err := os.Create(actualName)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	// Find <nav> in actual file
-	i := strings.Index(str, beginNavBar)
-	if i >= 0 {
-		// Make a copy of the actual file until <nav>, generate a new <nav>..</nav> and copy the rest of the file
-		fmt.Println("Update navigation bar of file:", actualName)
-		fmt.Fprint(file, str[0:i])
-		writeNavigationBar(file, previousName, nextName, tocName)
-		j := strings.Index(str[i:], endNavBar)
-		if j < 0 {
-			fmt.Printf("File \"%s\" contains \"%s\" but not \"%s\"\n", movedActualName, beginNavBar, endNavBar)
-			os.Exit(1)
-		}
-		fmt.Fprint(file, str[i+j+len(endNavBar)+1:])
-
-	} else {
-		// No <nav> present in file; generate it newly directly after <body>
-		fmt.Printf("Generating new navigation bar \"%s\" directly after \"%s\" in file %s\n", beginNavBar, beginBody, actualName)
-		i = strings.Index(str, beginBody)
-		if i < 0 {
-			fmt.Printf("File \"%s\" does not contain \"%s\"\n", movedActualName, beginBody)
-			os.Exit(1)
-		}
-		fmt.Fprint(file, str[0:i])
-		writeNavigationBar(file, previousName, nextName, tocName)
-		fmt.Fprint(file, str[i+len(beginBody):])
-	}
-}
 
 // Write navigation bar
-func writeNavigationBar(file *os.File, previousName, nextName, tocName string) {
+func writeNavigationBar(file *os.File, iSection int) {
 	fmt.Fprintln(file, "<nav><ul>")
-	fmt.Fprintf(file, "  <li><a href=\"%s\">Table of Contents</a></li>\n", tocName)
-	if previousName != "" {
-		fmt.Fprintf(file, "  <li><a href=\"%s\">Previous</a></li>\n", previousName)
+	fmt.Fprintf(file, "  <li><a href=\"%s\">Table of Contents</a></li>\n", ReqNav[0])
+	fmt.Fprintf(file, "  <li><a href=\"%s\">Previous</a></li>\n", ReqNav[1])
+	if ReqNav[2] != "" {
+		fmt.Fprintf(file, "  <li><a href=\"%s\">Next</a></li>\n", ReqNav[2])
 	}
-	if nextName != "" {
-		fmt.Fprintf(file, "  <li><a href=\"%s\">Next</a></li>\n", nextName)
-	}
+	fmt.Fprintf(file, "  <li><a href=\"%s\" class=\"start\">Cover</a></li>\n", ReqNav[3])
+   label := ""
+   for i:=4; i<len(ReqNav); i++ {
+      label = BookStructure.Sections[i-4].Label
+      if iSection == i-4 {
+		   fmt.Fprintf(file, "  <li><a href=\"%s\" class=\"actual\">%s</a></li>\n", ReqNav[i], label)
+      } else {
+		   fmt.Fprintf(file, "  <li><a href=\"%s\">%s</a></li>\n", ReqNav[i], label)
+      }
+   }
 	fmt.Fprintln(file, "</ul></nav>")
 }
