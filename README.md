@@ -9,7 +9,7 @@ A book consists of a set of HTML files. A configuration file
 
 makeWebBook bookDirectory
 
-the following actions are preformed provided a corresponding element
+the following actions are performed provided a corresponding element
 starts with the text "Chapter" or "Appendix" (otherwise the section is
 not modified; this is useful for a preface or a reference chapter):
 
